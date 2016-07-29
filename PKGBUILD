@@ -6,19 +6,19 @@
 
 pkgbase=nvidia-utils
 pkgname=('nvidia-utils' 'nvidia-libgl' 'opencl-nvidia')
-pkgver=361.16
+pkgver=367.36.02
 pkgrel=1
 arch=('i686' 'x86_64')
 url="http://www.nvidia.com/"
 license=('custom')
 options=('!strip')
-source=("http://us.download.nvidia.com/XFree86/Linux-x86/${pkgver}/NVIDIA-Linux-x86-${pkgver}.run"
-        "http://us.download.nvidia.com/XFree86/Linux-x86_64/${pkgver}/NVIDIA-Linux-x86_64-${pkgver}-no-compat32.run")
-sha1sums=('786d94caab0830fd16039cc7d26e1e6d6694d766'
-          'b778a97a5175ac6999461708610e55cf445fdf4d')
+source=("http://developer.download.nvidia.com/assets/opengl/369.00/NVIDIA-Linux-x86-${pkgver}.run"
+        "http://developer.download.nvidia.com/assets/opengl/369.00/NVIDIA-Linux-x86_64-${pkgver}.run")
+sha1sums=('90fb507f11613ac46c9bed2aab4abc955f33e993'
+          '3106be1ee98d43e7ef0391d749db32152e0acf31')
 
 [[ "$CARCH" = "i686" ]] && _pkg="NVIDIA-Linux-x86-${pkgver}"
-[[ "$CARCH" = "x86_64" ]] && _pkg="NVIDIA-Linux-x86_64-${pkgver}-no-compat32"
+[[ "$CARCH" = "x86_64" ]] && _pkg="NVIDIA-Linux-x86_64-${pkgver}"
 
 prepare() {
     sh "${_pkg}.run" --extract-only
@@ -37,6 +37,8 @@ process_manifest () {
         ["APPLICATION_PROFILE"]="nvidia-libgl install_app_profile"
         ["GLVND_LIB"]="nvidia-libgl install_lib"
         ["GLVND_SYMLINK"]="nvidia-libgl symlink_lib"
+        ["GLX_CLIENT_LIB"]="nvidia-libgl install_glvnd"
+        ["GLX_CLIENT_SYMLINK"]="nvidia-libgl symlink_glvnd"
         ["GLX_MODULE_SHARED_LIB"]="nvidia-libgl install_glx_module"
         ["GLX_MODULE_SYMLINK"]="nvidia-libgl symlink_glx_module"
         ["NVIDIA_MODPROBE_MANPAGE"]="nvidia-libgl install_man"
@@ -46,6 +48,7 @@ process_manifest () {
         ["TLS_LIB"]="nvidia-libgl install_tls"
         ["VDPAU_LIB"]="nvidia-libgl install_lib"
         ["VDPAU_SYMLINK"]="nvidia-libgl symlink_lib_with_path"
+        ["VULKAN_ICD_JSON"]="nvidia-libgl install_vulkan_icd"
         ["XMODULE_SHARED_LIB"]="nvidia-libgl install_x_driver"
         ["XORG_OUTPUTCLASS_CONFIG"]="nvidia-libgl install_x_config"
 
@@ -74,9 +77,6 @@ process_manifest () {
         ["OPENCL_WRAPPER_SYMLINK"]="ignored"    # provided by libcl
         ["OPENGL_HEADER"]="ignored"             # provided by mesa
         ["UTILITY_BIN_SYMLINK"]="ignored"       # provided by pacman
-        ["UVM_MODULE_SRC"]="ignored"            # kernel modules are handled by the nvidia PKGBUILD
-        ["VDPAU_WRAPPER_LIB"]="ignored"         # provided by libvdpau
-        ["VDPAU_WRAPPER_SYMLINK"]="ignored"     # provided by libvdpau
         ["XMODULE_NEWSYM"]="ignored"            # not needed for modern X servers
         ["XMODULE_SYMLINK"]="ignored"           # not needed for modern X servers
     )
@@ -107,10 +107,45 @@ process_manifest () {
 install_app_profile()   { install -D -m$2 "$1" "${pkgdir}/usr/share/nvidia/$1"; }
 install_bin()           { install -D -m$2 "$1" "${pkgdir}/usr/bin/$1"; }
 install_glx_module()    { install -D -m$2 "$1" "${pkgdir}/usr/lib/xorg/modules/extensions/$1"; }
-install_lib()           { install -D -m$2 "$1" "${pkgdir}/usr/lib/$5$1"; }
-install_man()           { install -D -m$2 "$1" "${pkgdir}/usr/share/man/man1/$1"; }
 install_opencl_vendor() { install -D -m$2 "$1" "${pkgdir}/etc/OpenCL/vendors/$1"; }
+install_vulkan_icd()    { install -D -m$2 "$1" "${pkgdir}/etc/vulkan/icd.d/$1"; }
 install_x_config()      { install -D -m$2 "$1" "${pkgdir}/usr/share/X11/xorg.conf.d/$1"; }
+
+install_glvnd()         {
+    case "$4:$5" in
+        COMPAT32:*)
+            # not needed
+            ;;
+        NATIVE:NON_GLVND)
+            # legacy non-GLVND GLX libraries
+            ;;
+        NATIVE:GLVND)
+            install -D -m$2 "$1" "${pkgdir}/usr/lib/$1";
+            ;;
+    esac
+}
+
+install_lib()           {
+    case "$4" in
+        COMPAT32)
+            # not needed
+            ;;
+        NATIVE)
+            install -D -m$2 "$1" "${pkgdir}/usr/lib/$5$1";
+            ;;
+    esac
+}
+
+install_man()           {
+    case "$1" in
+        nvidia-installer*)
+            # not needed because "INSTALLER_BINARY" is ignored
+            ;;
+        *)
+            install -D -m$2 "$1" "${pkgdir}/usr/share/man/man1/$1";
+            ;;
+    esac
+}
 
 install_x_driver()      {
     case "$1" in
@@ -132,24 +167,26 @@ install_dot_desktop()   {
            "${pkgdir}/usr/share/applications/$1"
 }
 
-install_tls() {
+install_tls()           {
     # Only "new" TLS is needed on modern systems.
-    case $5 in
-        CLASSIC)
+    case "$4:$5" in
+        COMPAT32:*)
+            # not needed
+            ;;
+        NATIVE:CLASSIC)
             return
             ;;
-        NEW)
-            local libname=$(basename $1)
-            install -D -m$2 "$1" "${pkgdir}/usr/lib/${libname}"
+        NATIVE:NEW)
+            install -D -m$2 "$1" "${pkgdir}/usr/lib/$1"
             ;;
-        *)
+        NATIVE:*)
             echo "Unrecognized TLS library type $5"
             exit 1
             ;;
     esac
 }
 
-install_doc() {
+install_doc()           {
     # Strip the historical NVIDIA_GLX-1.0 prefix off of the target path and
     # "html" off the source path.
     local src=$(basename $1)
@@ -158,8 +195,42 @@ install_doc() {
 }
 
 symlink_glx_module()    { ln -s "$5" "${pkgdir}/usr/lib/xorg/modules/extensions/$1"; }
-symlink_lib()           { ln -s "$5" "${pkgdir}/usr/lib/$1"; }
-symlink_lib_with_path() { ln -s "$6" "${pkgdir}/usr/lib/$5$1"; }
+
+symlink_lib()           {
+    case "$4" in
+        COMPAT32)
+            # not needed
+            ;;
+        NATIVE)
+            ln -s "$5" "${pkgdir}/usr/lib/$1";
+            ;;
+    esac
+}
+
+symlink_lib_with_path() {
+    case "$4" in
+        COMPAT32)
+            # not needed
+            ;;
+        NATIVE)
+            ln -s "$6" "${pkgdir}/usr/lib/$5$1";
+            ;;
+    esac
+}
+
+symlink_glvnd()         {
+    case "$4:$6" in
+        COMPAT32:*)
+            # not needed
+            ;;
+        NATIVE:NON_GLVND)
+            # legacy non-GLVND GLX symlinks
+            ;;
+        NATIVE:GLVND)
+            ln -s "$5" "${pkgdir}/usr/lib/$1";
+            ;;
+    esac
+}
 
 package_opencl-nvidia() {
     pkgdesc="OpenCL implemention for NVIDIA"
@@ -172,9 +243,9 @@ package_opencl-nvidia() {
 
 package_nvidia-libgl() {
     pkgdesc="NVIDIA drivers libraries"
-    conflicts=('libgl')
-    provides=('libgl')
     optdepends=('libvdpau: VDPAU wrapper library')
+    provides=('libgl' 'libglvnd')
+    conflicts=('libgl' 'libglvnd')
     cd "${_pkg}"
 
     process_manifest
@@ -183,9 +254,10 @@ package_nvidia-libgl() {
 package_nvidia-utils() {
     pkgdesc="NVIDIA drivers utilities"
     depends=('xorg-server')
-    optdepends=('gtk3: nvidia-settings'
-                'xorg-server-devel: nvidia-xconfig'
+    optdepends=('xorg-server-devel: nvidia-xconfig'
                 'opencl-nvidia: OpenCL support')
+    provides=('nvidia-settings')
+    conflicts=('nvidia-settings')
     install="${pkgname}.install"
     cd "${_pkg}"
 
